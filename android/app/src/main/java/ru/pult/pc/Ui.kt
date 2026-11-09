@@ -6,6 +6,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -13,20 +14,30 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 object Colors {
-    val BG = 0xFF101114.toInt()
-    val SURFACE = 0xFF1D1F26.toInt()
+    val BG = 0xFF0E0F13.toInt()
+    val SURFACE = 0xFF1B1D25.toInt()
+    val SURFACE2 = 0xFF252833.toInt()
     val ACCENT = 0xFF7C5CFF.toInt()
+    val ACCENT2 = 0xFF4C8DFF.toInt()
     val TEXT = 0xFFEDEDF2.toInt()
     val MUTED = 0xFF8A8D98.toInt()
+    val OK = 0xFF3DDC84.toInt()
+    val WARN = 0xFFFFB020.toInt()
+    val DANGER = 0xFFFF6B6B.toInt()
 }
 
 fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-fun Context.rounded(color: Int, radiusDp: Int = 16): GradientDrawable =
-    GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = dp(radiusDp).toFloat()
+/** Скруглённый фон. Акцентный цвет рисуется градиентом. */
+fun Context.rounded(color: Int, radiusDp: Int = 16): GradientDrawable {
+    val d = if (color == Colors.ACCENT) {
+        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Colors.ACCENT, Colors.ACCENT2))
+    } else {
+        GradientDrawable().apply { setColor(color) }
     }
+    d.cornerRadius = dp(radiusDp).toFloat()
+    return d
+}
 
 fun Context.rippleBg(color: Int, radiusDp: Int = 16): RippleDrawable =
     RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), rounded(color, radiusDp), null)
@@ -38,16 +49,26 @@ fun Context.button(
     label: String,
     sizeSp: Float = 17f,
     color: Int = Colors.SURFACE,
+    textColor: Int = Colors.TEXT,
     onClick: () -> Unit
 ): Button = Button(this).apply {
     text = label
     textSize = sizeSp
     isAllCaps = false
-    setTextColor(Colors.TEXT)
+    setTextColor(textColor)
     background = rippleBg(color)
     stateListAnimator = null
     setPadding(dp(10), dp(12), dp(10), dp(12))
     setOnClickListener { onClick() }
+    // лёгкое «нажатие» кнопки
+    setOnTouchListener { v, e ->
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.96f).scaleY(0.96f).setDuration(70).start()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+        }
+        false
+    }
 }
 
 fun Context.label(text: String, sizeSp: Float = 16f, color: Int = Colors.TEXT): TextView =
@@ -77,3 +98,8 @@ fun Context.row(vararg views: View, heightWeight: Float = 0f): LinearLayout =
     }.also {
         it.layoutParams = lp(-1, if (heightWeight > 0f) 0 else -2, heightWeight, 0)
     }
+
+fun View.fadeIn() {
+    alpha = 0f
+    animate().alpha(1f).setDuration(180).start()
+}

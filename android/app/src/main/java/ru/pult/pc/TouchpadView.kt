@@ -1,31 +1,27 @@
 package ru.pult.pc
 
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
-import android.view.View
 import android.view.ViewConfiguration
 import kotlin.math.hypot
 
 /**
- * Тачпад:
+ * Тачпад (с картинкой экрана ПК под пальцем, если она есть):
  *  - один палец — двигать курсор
  *  - короткое касание — клик (два касания подряд — двойной клик)
  *  - два пальца вверх/вниз — прокрутка, короткое касание двумя пальцами — правый клик
  *  - удержать палец и потом двигать — перетаскивание
+ *  - режим «касание» (direct): курсор прыгает туда, куда ткнул на картинке
  * Движения объединяются и уходят не чаще ~60 раз в секунду.
  */
-class TouchpadView(context: Context, private val remote: Remote) : View(context) {
+class TouchpadView(context: Context, private val remote: Remote) : FrameView(context) {
 
-    private val density = resources.displayMetrics.density
+    var direct = false
+
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val main = Handler(Looper.getMainLooper())
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val rect = RectF()
 
     private var startX = 0f
     private var startY = 0f
@@ -44,6 +40,18 @@ class TouchpadView(context: Context, private val remote: Remote) : View(context)
     private var scrollAcc = 0f
     private var flushScheduled = false
 
+    private var absScheduled = false
+    private var absX = 0f
+    private var absY = 0f
+
+    override fun bgColor(): Int = if (dragging) Colors.ACCENT else Colors.SURFACE
+
+    override fun hintLines(): List<String> = listOf(
+        "Двигай пальцем. Касание — клик",
+        "Два пальца — прокрутка и правый клик",
+        "Удержи и двигай — перетаскивание"
+    )
+
     private val flush = Runnable {
         flushScheduled = false
         if (pendX != 0 || pendY != 0) {
@@ -53,11 +61,36 @@ class TouchpadView(context: Context, private val remote: Remote) : View(context)
         }
     }
 
+    private val absRun = Runnable {
+        absScheduled = false
+        remote.moveTo(absX, absY)
+    }
+
     private val startDrag = Runnable {
         if (!moved && !twoFinger) {
             dragging = true
             remote.mouseButton(1, true)
             invalidate()
+        }
+    }
+
+    private fun useDirect(): Boolean = direct && frame != null
+
+    private fun toNorm(x: Float, y: Float) {
+        computeDst()
+        absX = ((x - dst.left) / dst.width()).coerceIn(0f, 1f)
+        absY = ((y - dst.top) / dst.height()).coerceIn(0f, 1f)
+    }
+
+    private fun goTo(x: Float, y: Float, now: Boolean) {
+        toNorm(x, y)
+        if (now) {
+            main.removeCallbacks(absRun)
+            absScheduled = false
+            remote.moveTo(absX, absY)
+        } else if (!absScheduled) {
+            absScheduled = true
+            main.postDelayed(absRun, 16)
         }
     }
 
@@ -81,11 +114,16 @@ class TouchpadView(context: Context, private val remote: Remote) : View(context)
     private fun finishGesture(e: MotionEvent, cancelled: Boolean) {
         main.removeCallbacks(startDrag)
         main.removeCallbacks(flush)
+        main.removeCallbacks(absRun)
         flushScheduled = false
         if (pendX != 0 || pendY != 0) {
             remote.move(pendX, pendY)
             pendX = 0
             pendY = 0
+        }
+        if (absScheduled) {
+            absScheduled = false
+            remote.moveTo(absX, absY)
         }
         val dt = e.eventTime - downTime
         if (dragging) {
@@ -113,6 +151,7 @@ class TouchpadView(context: Context, private val remote: Remote) : View(context)
                 twoFinger = false
                 scrolled = false
                 accX = 0f; accY = 0f
+                if (useDirect()) goTo(e.x, e.y, true)
                 main.postDelayed(startDrag, 450)
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -140,7 +179,11 @@ class TouchpadView(context: Context, private val remote: Remote) : View(context)
                         moved = true
                         main.removeCallbacks(startDrag)
                     }
-                    addMove(e.x - lastX, e.y - lastY)
+                    if (useDirect()) {
+                        if (moved || dragging) goTo(e.x, e.y, false)
+                    } else {
+                        addMove(e.x - lastX, e.y - lastY)
+                    }
                     lastX = e.x
                     lastY = e.y
                 }
@@ -149,19 +192,5 @@ class TouchpadView(context: Context, private val remote: Remote) : View(context)
             MotionEvent.ACTION_CANCEL -> finishGesture(e, true)
         }
         return true
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        paint.color = if (dragging) Colors.ACCENT else Colors.SURFACE
-        rect.set(0f, 0f, width.toFloat(), height.toFloat())
-        canvas.drawRoundRect(rect, 28 * density, 28 * density, paint)
-        paint.color = Colors.MUTED
-        paint.textSize = 14 * density
-        paint.textAlign = Paint.Align.CENTER
-        val cx = width / 2f
-        val cy = height / 2f
-        canvas.drawText("Двигай пальцем. Касание — клик", cx, cy - 10 * density, paint)
-        canvas.drawText("Два пальца — прокрутка и правый клик", cx, cy + 12 * density, paint)
-        canvas.drawText("Удержи и двигай — перетаскивание", cx, cy + 34 * density, paint)
     }
 }

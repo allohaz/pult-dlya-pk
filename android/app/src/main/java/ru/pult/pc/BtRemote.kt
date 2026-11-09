@@ -131,12 +131,41 @@ class BtRemote(private val ctx: Context, private val listener: Listener) : Remot
                 else -> k = KEYS[p] ?: 0
             }
         }
-        if (k != 0) sendKey(mods, k)
+        if (k != 0 || mods != 0) sendKey(mods, k)
     }
 
     private fun sendKey(mods: Int, usage: Int) {
         send(1, byteArrayOf(mods.toByte(), 0, usage.toByte(), 0, 0, 0, 0, 0))
         send(1, ByteArray(8))
+    }
+
+    // Зажатые клавиши для игр (в отчёте клавиатуры помещается до 6 обычных клавиш + модификаторы)
+    private val heldUsages = ArrayList<Int>()
+    private var heldMods = 0
+
+    override fun keyHold(name: String, down: Boolean) {
+        val n = name.lowercase()
+        val mod = when (n) {
+            "ctrl" -> 1
+            "shift" -> 2
+            "alt" -> 4
+            "win" -> 8
+            else -> 0
+        }
+        if (mod != 0) {
+            heldMods = if (down) heldMods or mod else heldMods and mod.inv()
+        } else {
+            val u = KEYS[n] ?: return
+            if (down) {
+                if (!heldUsages.contains(u) && heldUsages.size < 6) heldUsages.add(u)
+            } else {
+                heldUsages.remove(u)
+            }
+        }
+        val rep = ByteArray(8)
+        rep[0] = heldMods.toByte()
+        for (i in 0 until minOf(6, heldUsages.size)) rep[2 + i] = heldUsages[i].toByte()
+        send(1, rep)
     }
 
     override fun text(s: String) {
@@ -166,6 +195,11 @@ class BtRemote(private val ctx: Context, private val listener: Listener) : Remot
 
     override fun close() {
         closed = true
+        // отпустить всё, что могло остаться зажатым
+        try {
+            send(1, ByteArray(8))
+            send(2, byteArrayOf(0, 0, 0, 0))
+        } catch (_: Exception) {}
         try { host?.let { hid?.disconnect(it) } } catch (_: Exception) {}
         try { hid?.unregisterApp() } catch (_: Exception) {}
         try { adapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid) } catch (_: Exception) {}
